@@ -974,18 +974,20 @@ async function testApi(){
 }
 
 // ===== MATH ENGINE WITH MONTE CARLO =====
+// 统一点数: '10' -> 'T'
+const _nrm=r=>r==='10'?'T':r;
 // 从牌堆抽出指定手牌类型 (如 "AA"/"AKs"), 移除并返回
 function _dealType(type,deck){
-  if(type.length===2){const r=type[0],idxs=[];for(let i=0;i<deck.length;i++)if(deck[i].rank===r)idxs.push(i);if(idxs.length<2)return null;const c1=deck.splice(idxs[0],1)[0],c2=deck.splice(idxs[1]-1,1)[0];return[c1,c2];}
+  if(type.length===2){const r=type[0],idxs=[];for(let i=0;i<deck.length;i++)if(_nrm(deck[i].rank)===r)idxs.push(i);if(idxs.length<2)return null;const c1=deck.splice(idxs[0],1)[0],c2=deck.splice(idxs[1]-1,1)[0];return[c1,c2];}
   const hi=type[0],lo=type[1],suited=type[2]==='s';
-  if(suited){for(const s of SUITS){const i1=deck.findIndex(c=>c.rank===hi&&c.suit===s);if(i1<0)continue;const i2=deck.findIndex(c=>c.rank===lo&&c.suit===s);if(i2<0)continue;const c1=deck.splice(i1,1)[0],c2=deck.splice(i1<i2?i2-1:i2,1)[0];return[c1,c2];}return null;}
-  const i1=deck.findIndex(c=>c.rank===hi);if(i1<0)return null;const c1=deck.splice(i1,1)[0];
-  const i2=deck.findIndex(c=>c.rank===lo&&c.suit!==c1.suit);if(i2<0){deck.push(c1);return null;}
+  if(suited){for(const s of SUITS){const i1=deck.findIndex(c=>_nrm(c.rank)===hi&&c.suit===s);if(i1<0)continue;const i2=deck.findIndex(c=>_nrm(c.rank)===lo&&c.suit===s);if(i2<0)continue;const c1=deck.splice(i1,1)[0],c2=deck.splice(i1<i2?i2-1:i2,1)[0];return[c1,c2];}return null;}
+  const i1=deck.findIndex(c=>_nrm(c.rank)===hi);if(i1<0)return null;const c1=deck.splice(i1,1)[0];
+  const i2=deck.findIndex(c=>_nrm(c.rank)===lo&&c.suit!==c1.suit);if(i2<0){deck.push(c1);return null;}
   return[c1,deck.splice(i2,1)[0]];
 }
 // ---- Monte Carlo Equity (从范围直接抽样, 保证有效) ----
 function mcEquity(myHand, oppRanges, community, deadCards, iters=200){
-  const fmt=c=>c.rank+c.suit;
+  const fmt=c=>_nrm(c.rank)+c.suit;
   const used=new Set([...myHand,...community,...deadCards].map(fmt));
   const deck=[];for(const s of SUITS)for(const r of RANKS){const card={suit:s,rank:r,value:RANK_VAL[r]};if(!used.has(fmt(card)))deck.push(card);}
   const cands=oppRanges.map(r=>{
@@ -995,7 +997,7 @@ function mcEquity(myHand, oppRanges, community, deadCards, iters=200){
   });
   let wins=0,ties=0,total=0;
   for(let iter=0;iter<iters;iter++){
-    const d=[...deck];const oh=[];let ok=true;
+    const d=[...deck];shuffleArr(d);const oh=[];let ok=true;
     for(let ci=0;ci<cands.length;ci++){
       const cand=cands[ci];
       if(cand===null){if(d.length<2){ok=false;break;}oh.push([d.pop(),d.pop()]);}
@@ -1152,7 +1154,7 @@ async function mathDecide(){
 
 // ---- 严格引擎辅助（预计算胜率表驱动，无经验常数） ----
 const _EQ=typeof PREFLOP_EQUITY!=='undefined'?PREFLOP_EQUITY:{};
-function _handKey(c1,c2){if(c1.rank===c2.rank)return c1.rank+c1.rank;const v1=RANK_VAL[c1.rank],v2=RANK_VAL[c2.rank];const hi=v1>=v2?c1.rank:c2.rank,lo=v1>=v2?c2.rank:c1.rank;return hi+lo+(c1.suit===c2.suit?'s':'o');}
+function _handKey(c1,c2){const r1=_nrm(c1.rank),r2=_nrm(c2.rank);if(r1===r2)return r1+r1;const v1=RANK_VAL[r1],v2=RANK_VAL[r2];const hi=v1>=v2?r1:r2,lo=v1>=v2?r2:r1;return hi+lo+(c1.suit===c2.suit?'s':'o');}
 function _handCombos(k){return k.length===2?6:(k[2]==='s'?4:12);}
 function _handEq(c1,c2){const k=_handKey(c1,c2);return _EQ[k]?_EQ[k][0]:0.5;}
 function _tableEq(k,n){return _EQ[k]?_EQ[k][Math.max(0,Math.min(7,n-1))]:0.5;}
@@ -1193,11 +1195,15 @@ function mathDecideLocal(){
   if(maxRaise>minRaise){
     const candSet=new Set([minRaise]);
     const pot=G.pot||1;
-    for(const f of [0.5,1.0,2.0]){const R=Math.floor(pot*f/10)*10; if(R>minRaise&&R<=maxRaise) candSet.add(R);}
+    for(const f of [0.25,0.5,0.75,1.0,1.5,2.0]){const R=Math.floor(pot*f/10)*10; if(R>minRaise&&R<=maxRaise) candSet.add(R);}
     candSet.add(maxRaise);
-    const sorted=[...candSet].filter(R=>R>G.currentBet&&R<=maxRaise).sort((a,b)=>a-b);
-    for(const R of sorted.slice(0,5)){
+    let sorted=[...candSet].filter(R=>R>G.currentBet&&R<=maxRaise).sort((a,b)=>a-b).slice(0,8);
+    // ---- 合理性软惩罚 (连续, 超预算的每一块钱当作无价值从EV扣除) ----
+    const edge=Math.max(0,equity-0.5);
+    const riskCap=p.chips*(0.08+edge);
+    for(const R of sorted){
       const myAdd=Math.max(R-(p.bet||0),0);
+      const overBudget=Math.max(0,myAdd-riskCap);
       let pAllFold=1,ev=0,pCalls=[];
       for(const opp of opps){
         const betFaced=Math.max(R-(opp.bet||0),0);
@@ -1212,8 +1218,13 @@ function mathDecideLocal(){
       }
       const avgCallFrac=pCalls.length?pCalls.reduce((s,c)=>s+c.callFrac,0)/pCalls.length:0.5;
       const eqVsCaller=avgCallFrac>=1?equity:mcEquity(p.hand,[{width:avgCallFrac,minEq:_widthToEq(avgCallFrac)}],G.community,G.burnCards,120);
+      // ---- 诈唬门槛: 被跟时落后的加注需要极高弃牌率 ----
+      if(eqVsCaller<0.5){
+        const breakeven=myAdd/(G.pot+myAdd+1);
+        if(pAllFold<Math.min(1.0,2*breakeven)) continue;
+      }
       for(const c of pCalls)ev+=c.pCall*(eqVsCaller*(G.pot+myAdd+c.betFaced)-myAdd);
-      decisions.push({action:'raise',amount:R,ev:ev+pAllFold*G.pot});
+      decisions.push({action:'raise',amount:R,ev:ev+pAllFold*G.pot-overBudget});
     }
   }
 

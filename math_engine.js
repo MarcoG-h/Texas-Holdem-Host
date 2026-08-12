@@ -11,11 +11,12 @@
 const PREFLOP = require('./preflop_equity.js');
 
 const SUITS = ['spades','hearts','clubs','diams'];
-const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
-const RANK_VAL = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
+const RANKS = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
+const RANK_VAL = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'10':10,'J':11,'Q':12,'K':13,'A':14};
 const SHORT = {'spades':'s','hearts':'h','clubs':'c','diams':'d'};
+const nrm = r => r==='10' ? 'T' : r;   // 统一点数表示: '10' -> 'T'
 
-function fmt(c){return c.rank + SHORT[c.suit];}
+function fmt(c){return nrm(c.rank) + SHORT[c.suit];}
 
 // ============================================================
 //  HAND EVALUATION (精确，无近似)
@@ -56,9 +57,10 @@ function cmpHand(a,b){if(a.rank!==b.rank)return a.rank-b.rank;for(let i=0;i<Math
 // ============================================================
 // 手牌 key: "AA" | "AKs" | "AKo"
 function handKey(c1,c2){
-  if(c1.rank===c2.rank) return c1.rank+c1.rank;
-  const v1=RANK_VAL[c1.rank],v2=RANK_VAL[c2.rank];
-  const hi=v1>=v2?c1.rank:c2.rank, lo=v1>=v2?c2.rank:c1.rank;
+  const r1=nrm(c1.rank),r2=nrm(c2.rank);
+  if(r1===r2) return r1+r1;
+  const v1=RANK_VAL[r1],v2=RANK_VAL[r2];
+  const hi=v1>=v2?r1:r2, lo=v1>=v2?r2:r1;
   return hi+lo+(c1.suit===c2.suit?'s':'o');
 }
 function handCombos(key){return key.length===2?6:(key[2]==='s'?4:12);}
@@ -162,9 +164,9 @@ function mcEquity(myHand, oppRanges, community, deadCards, iters){
     if(r.width<=0) return [];
     return EQ_LIST.filter(h=>h.eq>=r.minEq).map(h=>h.key); // 该范围可打的手牌
   });
-  let wins=0,ties=0,total=0;
+  let wins=0,ties=0,total=0,nDeal=0;
   for(let i=0;i<iters;i++){
-    const d=[...deck]; const oh=[]; let ok=true;
+    const d=[...deck]; shuffle(d); const oh=[]; let ok=true;   // 每轮洗牌!
     for(let ci=0;ci<cands.length;ci++){
       const cand=cands[ci];
       if(cand===null){ if(d.length<2){ok=false;break;} const c1=d.pop(),c2=d.pop(); oh.push([c1,c2]); }
@@ -172,7 +174,7 @@ function mcEquity(myHand, oppRanges, community, deadCards, iters){
       else{
         const type=cand[Math.floor(Math.random()*cand.length)];
         const hand=dealType(type,d);
-        if(!hand){ ok=false; break; }
+        if(!hand){ ok=false; nDeal++; break; }
         oh.push(hand);
       }
     }
@@ -186,6 +188,7 @@ function mcEquity(myHand, oppRanges, community, deadCards, iters){
     else if(ob.every(b=>b&&cmpHand(mb,b)>=0)) ties++; // 未被任何人击败(含平局)
     total++;
   }
+  __stats.mcDebug={dealFail:nDeal,total,totalIter:iters,wins,ties,candCounts:cands.map(c=>c?c.length:0)};
   return total>0?(wins+ties*0.5)/total:0.5;
 }
 
@@ -230,15 +233,30 @@ function decide(state){
   const minRaise = state.currentBet + state.lastRaiseSize;
   const maxRaise = me.chips + me.bet;
   if(maxRaise > minRaise && toCall>=0){
-    // 候选采样点: 最小加注、底池 0.5/1.0/2.0 倍、全押 (搜索分辨率, 非决策常数)
+    // 候选采样点: 最小加注、底池 0.25~2.0 倍、全押 (搜索分辨率, 非决策常数)
     const candSet=new Set([minRaise]);
     const pot=state.pot||1;
-    for(const f of [0.5,1.0,2.0]){const R=Math.floor(pot*f/10)*10; if(R>minRaise&&R<=maxRaise) candSet.add(R);}
+    for(const f of [0.25,0.5,0.75,1.0,1.5,2.0]){const R=Math.floor(pot*f/10)*10; if(R>minRaise&&R<=maxRaise) candSet.add(R);}
     candSet.add(maxRaise);
-    const sorted=[...candSet].filter(R=>R>state.currentBet&&R<=maxRaise).sort((a,b)=>a-b);
-    for(const R of sorted.slice(0,5)){
-      const ev = raiseEV(R, me, state, opps, history, cc, equity);
-      decisions.push({action:'raise',amount:R,ev});
+    let sorted=[...candSet].filter(R=>R>state.currentBet&&R<=maxRaise).sort((a,b)=>a-b).slice(0,8);
+    // ---- 合理性软惩罚 (连续, 不参与EV公式本身, 只作为决策评判税) ----
+    // 风险预算 = 栈×(0.08+胜率优势). 超出预算的每一块钱当作无价值, 从EV中扣除.
+    // 所有候选仍参与EV对比 → 策略不退化, 只是超冒险被"征税"
+    const edge=Math.max(0,equity-0.5);
+    const riskCap=me.chips*(0.08+edge);
+    for(const R of sorted){
+      const myAdd=R-me.bet;
+      const overBudget=Math.max(0,myAdd-riskCap);
+      const r=raiseEV(R, me, state, opps, history, cc, equity);
+      // ---- 诈唬门槛: 被跟时落后(eqVsCaller<0.5)的加注=诈唬 ----
+      // 弱手只能为了"极高弃牌率"而加注: 需要弃牌率 ≥ 2×盈亏平衡点
+      // (盈亏平衡点 = 额外投入/(底池+额外投入), 翻倍留安全边际)
+      if(r.eqVsCaller<0.5){
+        const breakeven=myAdd/(state.pot+myAdd+1);
+        const needFold=Math.min(1.0,2*breakeven);
+        if(r.pAllFold<needFold) continue; // 弃牌率不够高, 排除此诈唬
+      }
+      decisions.push({action:'raise',amount:R,ev:r.ev-overBudget,overBudget});
     }
   }
 
@@ -246,6 +264,8 @@ function decide(state){
   let best=decisions[0];
   const prio={check:3,call:2,raise:1,fold:0};
   for(const d of decisions) if(d.ev>best.ev||(d.ev===best.ev&&prio[d.action]>prio[best.action])) best=d;
+  __stats.decisions++;
+  if(best.action==="raise"){ __stats.raises++; if(best.overBudget>0) __stats.capBound++; }
   return {
     action:best.action,
     amount:best.action==='raise'?best.amount:best.amount,
@@ -280,7 +300,8 @@ function raiseEV(R, me, state, opps, history, cc, myEq){
     const finalPot = pot + myAdd + c.betFaced;
     ev += c.pCall*(eqVsCaller*finalPot - myAdd);
   }
-  return ev + pAllFold*pot;
+  return {ev:ev + pAllFold*pot, pAllFold, eqVsCaller};
 }
 
-module.exports = { decide, mcEquity, bestHand, eval5, handKey, eqToWidth, widthToEq, tableEq };
+const __stats={capBound:0,raises:0,decisions:0};
+module.exports = { decide, mcEquity, bestHand, eval5, handKey, eqToWidth, widthToEq, tableEq, stats:__stats };

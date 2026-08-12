@@ -144,7 +144,7 @@ def mc_equity(my_hand, opp_ranges, community, dead, iters=200):
         else: cands.append([h["key"] for h in EQ_LIST if h["eq"]>=r["minEq"]])
     wins=0; ties=0; total=0
     for _ in range(iters):
-        d=list(deck); oh=[]; ok=True
+        d=list(deck); shuffle(d); oh=[]; ok=True
         for cand in cands:
             if cand is None:
                 if len(d)<2: ok=False; break
@@ -199,7 +199,7 @@ def raise_ev(R, state, opps, my_equity, me):
     eq_vs = my_equity if avg_frac>=1 else mc_equity(state['hand'],[{'width':avg_frac,'minEq':width_to_eq(avg_frac)}],state['community'],state.get('burnCards') or [],120)
     for p_call,_,bf in p_calls:
         ev += p_call*(eq_vs*(pot+my_add+bf)-my_add)
-    return ev + p_all_fold*pot
+    return {'ev':ev + p_all_fold*pot, 'pAllFold':p_all_fold, 'eqVsCaller':eq_vs}
 
 def decide(state):
     me = next(p for p in state['players'] if p['id']==state['me_id'])
@@ -230,12 +230,23 @@ def decide(state):
     if max_raise>min_raise:
         cand = {min_raise}
         pot = state['pot'] or 1
-        for f in (0.5,1.0,2.0):
+        for f in (0.25,0.5,0.75,1.0,1.5,2.0):
             R = int(pot*f/10)*10
             if min_raise < R <= max_raise: cand.add(R)
         cand.add(max_raise)
-        for R in sorted(c for c in cand if state['currentBet']<c<=max_raise)[:5]:
-            decisions.append({'action':'raise','amount':R,'ev':raise_ev(R,state,opps,equity,me)})
+        # ---- 合理性软惩罚 (超预算的每一块钱当作无价值从EV扣除) ----
+        edge = max(0, equity-0.5)
+        risk_cap = me['chips']*(0.08+edge)
+        cands = sorted(c for c in cand if state['currentBet']<c<=max_raise)[:8]
+        for R in cands:
+            over = max(0, (R-me['bet'])-risk_cap)
+            rv = raise_ev(R,state,opps,equity,me)
+            # ---- 诈唬门槛: 被跟时落后的加注需要极高弃牌率 ----
+            if rv['eqVsCaller'] < 0.5:
+                my_add = R-me['bet']
+                breakeven = my_add/(state['pot']+my_add+1)
+                if rv['pAllFold'] < min(1.0, 2*breakeven): continue
+            decisions.append({'action':'raise','amount':R,'ev':rv['ev']-over})
 
     prio={'check':3,'call':2,'raise':1,'fold':0}
     best = max(decisions, key=lambda d:(d['ev'],prio[d['action']]))
