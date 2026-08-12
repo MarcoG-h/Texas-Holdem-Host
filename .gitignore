@@ -1,0 +1,25 @@
+# 🔑 密钥 - 绝不提交
+API KEY.txt
+*.key
+*.secret
+
+# 依赖
+node_modules/
+
+# 日志 - 含 AI 决策数据, 体积大且含隐私
+logs/
+
+# 构建产物
+TexasHoldem.exe
+*.exe
+
+# 临时/异常文件
+c:
+output
+note
+gen_progress.log
+gen_run.log
+
+# 系统
+.DS_Store
+Thumbs.db

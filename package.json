@@ -1,0 +1,13 @@
+{
+  "name": "texas-holdem",
+  "version": "2.0.0",
+  "description": "Texas Hold'em Poker Dealer with AI",
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg server.js --targets node18-win-x64 --output TexasHoldem.exe",
+    "gen-equity": "node gen_preflop_equity.js"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}
