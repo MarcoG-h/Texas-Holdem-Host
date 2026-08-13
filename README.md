@@ -2,7 +2,7 @@
 
 A single-file Texas Hold'em poker host with dual AI engines — **MATH** (mathematical decision engine) and **LLM** (large language model) — packageable as a Windows EXE.
 
-![Main Interface](screenshots/Main%20Interface.png)
+![Main Interface](screenshots/main-interface.png)
 
 ## ✨ Features
 
@@ -17,13 +17,13 @@ A single-file Texas Hold'em poker host with dual AI engines — **MATH** (mathem
 
 After each hand, a table timeline shows every street's actions across all players — who raised, called, checked, or folded, and how the pot grew.
 
-![Replay timeline](screenshots/Replay.png)
+![Replay timeline](screenshots/replay.png)
 
 ## 🤖 AI Mode (API Setup)
 
 AI mode calls a large language model (DeepSeek or any OpenAI-compatible endpoint) to decide. It includes hand confirmation, cross-hand memory, and post-hand interrogation.
 
-![Bot control](screenshots/Botting.png)
+![Bot control](screenshots/botting.png)
 
 Each seat can be set to Manual, 📐 MATH, or 🤖 AI from the sidebar. During review, click 💭 on any AI action to interrogate its reasoning.
 
