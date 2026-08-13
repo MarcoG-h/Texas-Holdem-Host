@@ -2,6 +2,13 @@
 
 A single-file Texas Hold'em poker host with dual AI engines — **MATH** (mathematical decision engine) and **LLM** (large language model) — packageable as a Windows EXE.
 
+## 📸 Screenshots
+
+<!-- 截图方法: 把你的截图放到 screenshots/ 文件夹, 然后替换下面两行.
+     文件名可自定义, 保持路径 screenshots/ 前缀即可 -->
+![Main](screenshots/main.png)
+![Review](screenshots/review.png)
+
 ## ✨ Features
 
 - **Full game flow**: pre-flop / flop / turn / river, blind rotation, side pots, bust-out elimination
